@@ -21,37 +21,6 @@ jobs:
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Install Enterprise Certificate and Provisioning Profile
-        env:
-          CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
-          PROVISION_BASE64: ${{ secrets.PROVISION_BASE64 }}
-        run: |
-          set -e
-          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          
-          echo "$CERT_P12_BASE64" | base64 --decode > $CERT_PATH
-          
-          security create-keychain -p "" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "" $KEYCHAIN_PATH
-          security default-keychain -s $KEYCHAIN_PATH
-          
-          security import $CERT_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" $KEYCHAIN_PATH
-          
-          PROVISION_DIR=~/Library/MobileDevice/Provisioning\ Profiles
-          mkdir -p "$PROVISION_DIR"
-          echo "$PROVISION_BASE64" | base64 --decode > "$PROVISION_DIR/profile.mobileprovision"
-
-      - name: Modify Bundle Identifier
-        run: |
-          set -e
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = jiamin\.chen\.orange-cloud/PRODUCT_BUNDLE_IDENTIFIER = com.ctq.qmc.yiban.product/g' {} +
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = jiamin\.chen\.orange-cloud\.widgets/PRODUCT_BUNDLE_IDENTIFIER = com.ctq.qmc.yiban.product.widgets/g' {} +
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = jiamin\.chen\.orange-cloud\.watch/PRODUCT_BUNDLE_IDENTIFIER = com.ctq.qmc.yiban.product.watch/g' {} +
-
       - name: Detect Xcode project
         id: detect
         run: |
@@ -61,57 +30,58 @@ jobs:
           echo "project_path=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
           echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Build archive with Enterprise Cert
+      - name: Build App (No Sign)
         run: |
           set -e
           SCHEME="Orange Cloud"
-          ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
+          BUILD_DIR="$PWD/build/derived"
           mkdir -p build
           
           if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
-            xcodebuild \
+            xcodebuild build \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
               -scheme "$SCHEME" \
               -configuration Release \
-              -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="iPhone Distribution: China Telecom Corporation Limited" \
-              CODE_SIGNING_REQUIRED=YES \
-              CODE_SIGNING_ALLOWED=YES \
-              CODE_SIGN_STYLE="Manual" \
-              archive \
+              -destination "generic/platform=iOS" \
+              -derivedDataPath "$BUILD_DIR" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGN_ENTITLEMENTS="" \
+              DEVELOPMENT_TEAM="" \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
-              | tee build/xcodebuild-archive.log
+              | tee build/xcodebuild.log
           else
-            xcodebuild \
+            xcodebuild build \
               -project "${{ steps.detect.outputs.project_path }}" \
               -scheme "$SCHEME" \
               -configuration Release \
-              -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="iPhone Distribution: China Telecom Corporation Limited" \
-              CODE_SIGNING_REQUIRED=YES \
-              CODE_SIGNING_ALLOWED=YES \
-              CODE_SIGN_STYLE="Manual" \
-              archive \
+              -destination "generic/platform=iOS" \
+              -derivedDataPath "$BUILD_DIR" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGN_ENTITLEMENTS="" \
+              DEVELOPMENT_TEAM="" \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
-              | tee build/xcodebuild-archive.log
+              | tee build/xcodebuild.log
           fi
 
       - name: Package IPA
         run: |
           set -e
-          APP_PATH=$(find build/OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
+          APP_PATH=$(find build/derived/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             exit 1
           fi
           
-          mkdir -p build/Payload
-          cp -a "$APP_PATH" build/Payload/
+          mkdir -p build/export/Payload
+          cp -a "$APP_PATH" build/export/Payload/
           
-          cd build
+          rm -rf build/export/Payload/*.app/_CodeSignature
+          
+          cd build/export
           zip -qry OrangeCloud.ipa Payload
-          
-          mkdir -p export
-          mv OrangeCloud.ipa export/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -125,5 +95,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: orange-cloud-build-logs
-          path: build/xcodebuild-archive.log
+          path: build/xcodebuild.log
           if-no-files-found: warn
