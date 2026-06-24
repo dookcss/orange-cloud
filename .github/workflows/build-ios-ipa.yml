@@ -52,8 +52,6 @@ jobs:
           SCHEME="Orange Cloud"
           ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
           mkdir -p build
-          
-          # 核心修改点1：加入禁用签名的环境变量
           if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
             xcodebuild \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
@@ -83,22 +81,39 @@ jobs:
       - name: Build payload and IPA
         run: |
           set -e
-          echo "Packaging Payload from archive..."
-          cd "$PWD/build"
-          
-          APP_PATH=$(find OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
+          echo "Packaging Payload from archive using xcodebuild..."
+          cat > exportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          APP_PATH=$(find build/OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Error: No .app found in archive!"
             exit 1
           fi
-          
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -r OrangeCloud.ipa Payload
-          
+          echo "Found APP_PATH: $APP_PATH"
+          mkdir -p build/Payload
+          cp -a "$APP_PATH" build/Payload/
+          rm -rf build/Payload/*.app/_CodeSignature
+          cd build
+          zip -qry OrangeCloud.ipa Payload
           mkdir -p export
           mv OrangeCloud.ipa export/
-          echo "Successfully created unsigned IPA: build/export/OrangeCloud.ipa"
+          echo "Successfully created IPA from Payload: build/export/OrangeCloud.ipa"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -111,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: orange-cloud-build-logs
-          path: build/xcodebuild-archive.log
+          path: |
+            build/xcodebuild-archive.log
+            exportOptions.plist
           if-no-files-found: warn
 
       - name: Upload archive artifact
