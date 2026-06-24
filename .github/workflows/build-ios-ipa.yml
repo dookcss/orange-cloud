@@ -20,13 +20,11 @@ jobs:
         run: |
           ls /Applications | sed -n '1,20p'
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
-          echo "Using Xcode at: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
       - name: Show Xcode version
         run: |
           xcodebuild -version
-          xcode-select -p
 
       - name: Detect Xcode project
         id: detect
@@ -46,21 +44,53 @@ jobs:
             xcodebuild -project "${{ steps.detect.outputs.project_path }}" -list
           fi
 
+      - name: Inject temporary code signing
+        run: |
+          set -e
+          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' {} +
+          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_ENTITLEMENTS = .*;/CODE_SIGN_ENTITLEMENTS = "";/g' {} +
+          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' {} +
+          
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "" $KEYCHAIN_PATH
+          security default-keychain -s $KEYCHAIN_PATH
+          
+          cert_req=$(cat <<'EOF'
+          [req]
+          default_bits = 2048
+          prompt = no
+          default_md = sha256
+          distinguished_name = dn
+          [dn]
+          C = US
+          O = Self Signed
+          CN = Apple Development: Fake Cert
+          EOF
+          )
+          echo "$cert_req" > cert.conf
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout fake.key -out fake.crt -days 365 -config cert.conf
+          openssl pkcs12 -export -out fake.p12 -inkey fake.key -in fake.crt -password pass:
+          security import fake.p12 -k $KEYCHAIN_PATH -P "" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" $KEYCHAIN_PATH
+
       - name: Build archive
         run: |
           set -e
           SCHEME="Orange Cloud"
           ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
           mkdir -p build
+          
           if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
             xcodebuild \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGN_IDENTITY="Apple Development: Fake Cert" \
+              CODE_SIGNING_REQUIRED=YES \
+              CODE_SIGNING_ALLOWED=YES \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
@@ -70,9 +100,9 @@ jobs:
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGN_IDENTITY="Apple Development: Fake Cert" \
+              CODE_SIGNING_REQUIRED=YES \
+              CODE_SIGNING_ALLOWED=YES \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
@@ -81,7 +111,6 @@ jobs:
       - name: Build payload and IPA
         run: |
           set -e
-          echo "Packaging Payload from archive using xcodebuild..."
           cat > exportOptions.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,20 +129,21 @@ jobs:
           </dict>
           </plist>
           EOF
+          
           APP_PATH=$(find build/OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
-            echo "Error: No .app found in archive!"
             exit 1
           fi
-          echo "Found APP_PATH: $APP_PATH"
+          
           mkdir -p build/Payload
           cp -a "$APP_PATH" build/Payload/
           rm -rf build/Payload/*.app/_CodeSignature
+          
           cd build
           zip -qry OrangeCloud.ipa Payload
+          
           mkdir -p export
           mv OrangeCloud.ipa export/
-          echo "Successfully created IPA from Payload: build/export/OrangeCloud.ipa"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
