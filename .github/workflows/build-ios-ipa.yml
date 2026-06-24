@@ -1,0 +1,121 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          ls /Applications | sed -n '1,20p'
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Detect Xcode project
+        id: detect
+        run: |
+          set -e
+          PROJECT_PATH=$(find apps/ios -name "*.xcodeproj" | head -n 1)
+          WORKSPACE_PATH=$(find apps/ios -name "*.xcworkspace" | head -n 1 || true)
+          echo "project_path=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
+          echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: List schemes
+        run: |
+          set -e
+          if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
+            xcodebuild -workspace "${{ steps.detect.outputs.workspace_path }}" -list
+          else
+            xcodebuild -project "${{ steps.detect.outputs.project_path }}" -list
+          fi
+
+      - name: Build archive
+        run: |
+          set -e
+          SCHEME="Orange Cloud"
+          ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
+          mkdir -p build
+          if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
+            xcodebuild \
+              -workspace "${{ steps.detect.outputs.workspace_path }}" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -archivePath "$ARCHIVE_PATH" \
+              archive \
+              SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
+              | tee build/xcodebuild-archive.log
+          else
+            xcodebuild \
+              -project "${{ steps.detect.outputs.project_path }}" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -archivePath "$ARCHIVE_PATH" \
+              archive \
+              SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
+              | tee build/xcodebuild-archive.log
+          fi
+
+      - name: Export IPA
+        run: |
+          set -e
+          cat > exportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild \
+            -archivePath "$PWD/build/OrangeCloud.xcarchive" \
+            -exportArchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath "$PWD/build/export"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orange-cloud-ipa
+          path: build/export/*.ipa
+          if-no-files-found: error
+
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: orange-cloud-build-logs
+          path: |
+            build/xcodebuild-archive.log
+            exportOptions.plist
+          if-no-files-found: warn
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orange-cloud-xcarchive
+          path: build/OrangeCloud.xcarchive
+          if-no-files-found: warn
