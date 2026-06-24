@@ -18,13 +18,11 @@ jobs:
 
       - name: Select Xcode
         run: |
-          ls /Applications | sed -n '1,20p'
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
       - name: Show Xcode version
-        run: |
-          xcodebuild -version
+        run: xcodebuild -version
 
       - name: Detect Xcode project
         id: detect
@@ -44,53 +42,23 @@ jobs:
             xcodebuild -project "${{ steps.detect.outputs.project_path }}" -list
           fi
 
-      - name: Inject temporary code signing
-        run: |
-          set -e
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' {} +
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_ENTITLEMENTS = .*;/CODE_SIGN_ENTITLEMENTS = "";/g' {} +
-          find apps/ios -type f -name "project.pbxproj" -exec sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' {} +
-          
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          security create-keychain -p "" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "" $KEYCHAIN_PATH
-          security default-keychain -s $KEYCHAIN_PATH
-          
-          cert_req=$(cat <<'EOF'
-          [req]
-          default_bits = 2048
-          prompt = no
-          default_md = sha256
-          distinguished_name = dn
-          [dn]
-          C = US
-          O = Self Signed
-          CN = Apple Development: Fake Cert
-          EOF
-          )
-          echo "$cert_req" > cert.conf
-          openssl req -x509 -newkey rsa:2048 -nodes -keyout fake.key -out fake.crt -days 365 -config cert.conf
-          openssl pkcs12 -export -out fake.p12 -inkey fake.key -in fake.crt -password pass:
-          security import fake.p12 -k $KEYCHAIN_PATH -P "" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" $KEYCHAIN_PATH
-
       - name: Build archive
         run: |
           set -e
           SCHEME="Orange Cloud"
           ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
           mkdir -p build
-          
           if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
             xcodebuild \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="Apple Development: Fake Cert" \
-              CODE_SIGNING_REQUIRED=YES \
-              CODE_SIGNING_ALLOWED=YES \
+              -destination "generic/platform=iOS" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM="" \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
@@ -100,48 +68,91 @@ jobs:
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              CODE_SIGN_IDENTITY="Apple Development: Fake Cert" \
-              CODE_SIGNING_REQUIRED=YES \
-              CODE_SIGNING_ALLOWED=YES \
+              -destination "generic/platform=iOS" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM="" \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
           fi
 
-      - name: Build payload and IPA
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Package IPA with entitlements
         run: |
           set -e
-          cat > exportOptions.plist <<'EOF'
+          ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
+          APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -name "*.app" -maxdepth 1 | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in archive"
+            exit 1
+          fi
+
+          cat > /tmp/entitlements.plist <<'ENTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>method</key>
-            <string>ad-hoc</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>compileBitcode</key>
-            <false/>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>manageAppVersionAndBuildNumber</key>
-            <false/>
+            <key>com.apple.security.application-groups</key>
+            <array>
+              <string>group.jiamin.chen.Orange-Cloud</string>
+            </array>
+            <key>keychain-access-groups</key>
+            <array>
+              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
+            </array>
           </dict>
           </plist>
-          EOF
-          
-          APP_PATH=$(find build/OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
-          if [ -z "$APP_PATH" ]; then
-            exit 1
-          fi
-          
+          ENTEOF
+
+          cat > /tmp/entitlements-main.plist <<'ENTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>aps-environment</key>
+            <string>production</string>
+            <key>com.apple.security.application-groups</key>
+            <array>
+              <string>group.jiamin.chen.Orange-Cloud</string>
+            </array>
+            <key>keychain-access-groups</key>
+            <array>
+              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
+            </array>
+          </dict>
+          </plist>
+          ENTEOF
+
+          ldid -S/tmp/entitlements-main.plist "$APP_PATH/$(basename "$APP_PATH" .app)"
+
+          find "$APP_PATH" -name "*.appex" -type d | while read ext; do
+            EXT_BIN="$ext/$(basename "$ext" .appex)"
+            if [ -f "$EXT_BIN" ]; then
+              ldid -S/tmp/entitlements.plist "$EXT_BIN"
+            fi
+          done
+
+          find "$APP_PATH/Frameworks" -name "*.dylib" -type f 2>/dev/null | while read dylib; do
+            ldid -S "$dylib"
+          done
+
+          find "$APP_PATH/Frameworks" -name "*.framework" -type d 2>/dev/null | while read fw; do
+            FW_BIN="$fw/$(basename "$fw" .framework)"
+            if [ -f "$FW_BIN" ]; then
+              ldid -S "$FW_BIN"
+            fi
+          done
+
           mkdir -p build/Payload
           cp -a "$APP_PATH" build/Payload/
-          rm -rf build/Payload/*.app/_CodeSignature
-          
+
           cd build
           zip -qry OrangeCloud.ipa Payload
-          
+
           mkdir -p export
           mv OrangeCloud.ipa export/
 
@@ -153,17 +164,9 @@ jobs:
           if-no-files-found: error
 
       - name: Upload build logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: orange-cloud-build-logs
-          path: |
-            build/xcodebuild-archive.log
-            exportOptions.plist
-          if-no-files-found: warn
-
-      - name: Upload archive artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: orange-cloud-xcarchive
-          path: build/OrangeCloud.xcarchive
+          path: build/xcodebuild-archive.log
           if-no-files-found: warn
