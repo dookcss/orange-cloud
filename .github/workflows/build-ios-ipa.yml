@@ -78,35 +78,14 @@ jobs:
               | tee build/xcodebuild-archive.log
           fi
 
-      - name: Install ldid
-        run: brew install ldid
-
-      - name: Package IPA with entitlements
+      - name: Package IPA with ad-hoc signing
         run: |
           set -e
           ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
           APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -name "*.app" -maxdepth 1 | head -n 1)
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found in archive"
             exit 1
           fi
-
-          cat > /tmp/entitlements.plist <<'ENTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>com.apple.security.application-groups</key>
-            <array>
-              <string>group.jiamin.chen.Orange-Cloud</string>
-            </array>
-            <key>keychain-access-groups</key>
-            <array>
-              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
-            </array>
-          </dict>
-          </plist>
-          ENTEOF
 
           cat > /tmp/entitlements-main.plist <<'ENTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -127,25 +106,36 @@ jobs:
           </plist>
           ENTEOF
 
-          ldid -S/tmp/entitlements-main.plist "$APP_PATH/$(basename "$APP_PATH" .app)"
-
-          find "$APP_PATH" -name "*.appex" -type d | while read ext; do
-            EXT_BIN="$ext/$(basename "$ext" .appex)"
-            if [ -f "$EXT_BIN" ]; then
-              ldid -S/tmp/entitlements.plist "$EXT_BIN"
-            fi
-          done
+          cat > /tmp/entitlements-ext.plist <<'ENTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.application-groups</key>
+            <array>
+              <string>group.jiamin.chen.Orange-Cloud</string>
+            </array>
+            <key>keychain-access-groups</key>
+            <array>
+              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
+            </array>
+          </dict>
+          </plist>
+          ENTEOF
 
           find "$APP_PATH/Frameworks" -name "*.dylib" -type f 2>/dev/null | while read dylib; do
-            ldid -S "$dylib"
+            codesign --force --sign - "$dylib"
           done
 
           find "$APP_PATH/Frameworks" -name "*.framework" -type d 2>/dev/null | while read fw; do
-            FW_BIN="$fw/$(basename "$fw" .framework)"
-            if [ -f "$FW_BIN" ]; then
-              ldid -S "$FW_BIN"
-            fi
+            codesign --force --sign - "$fw"
           done
+
+          find "$APP_PATH" -name "*.appex" -type d | while read ext; do
+            codesign --force --sign - --entitlements /tmp/entitlements-ext.plist "$ext"
+          done
+
+          codesign --force --sign - --entitlements /tmp/entitlements-main.plist "$APP_PATH"
 
           mkdir -p build/Payload
           cp -a "$APP_PATH" build/Payload/
