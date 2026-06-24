@@ -21,8 +21,24 @@ jobs:
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Install Enterprise Certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          set -e
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          
+          echo "$CERT_P12_BASE64" | base64 --decode > $CERT_PATH
+          
+          security create-keychain -p "" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "" $KEYCHAIN_PATH
+          security default-keychain -s $KEYCHAIN_PATH
+          
+          security import $CERT_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" $KEYCHAIN_PATH
 
       - name: Detect Xcode project
         id: detect
@@ -33,32 +49,24 @@ jobs:
           echo "project_path=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
           echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: List schemes
-        run: |
-          set -e
-          if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
-            xcodebuild -workspace "${{ steps.detect.outputs.workspace_path }}" -list
-          else
-            xcodebuild -project "${{ steps.detect.outputs.project_path }}" -list
-          fi
-
-      - name: Build archive
+      - name: Build archive with Enterprise Cert
         run: |
           set -e
           SCHEME="Orange Cloud"
           ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
           mkdir -p build
+          
           if [ -n "${{ steps.detect.outputs.workspace_path }}" ]; then
             xcodebuild \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              -destination "generic/platform=iOS" \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              DEVELOPMENT_TEAM="" \
+              CODE_SIGN_IDENTITY="iPhone Distribution: China Telecom Corporation Limited" \
+              CODE_SIGNING_REQUIRED=YES \
+              CODE_SIGNING_ALLOWED=YES \
+              CODE_SIGN_STYLE="Manual" \
+              PROVISIONING_PROFILE_SPECIFIER="" \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
@@ -68,81 +76,30 @@ jobs:
               -scheme "$SCHEME" \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
-              -destination "generic/platform=iOS" \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              DEVELOPMENT_TEAM="" \
+              CODE_SIGN_IDENTITY="iPhone Distribution: China Telecom Corporation Limited" \
+              CODE_SIGNING_REQUIRED=YES \
+              CODE_SIGNING_ALLOWED=YES \
+              CODE_SIGN_STYLE="Manual" \
+              PROVISIONING_PROFILE_SPECIFIER="" \
               archive \
               SWIFT_ACTIVE_COMPILATION_CONDITIONS="OPENSOURCE_UNLOCKED" \
               | tee build/xcodebuild-archive.log
           fi
 
-      - name: Package IPA with ad-hoc signing
+      - name: Package IPA
         run: |
           set -e
-          ARCHIVE_PATH="$PWD/build/OrangeCloud.xcarchive"
-          APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -name "*.app" -maxdepth 1 | head -n 1)
+          APP_PATH=$(find build/OrangeCloud.xcarchive/Products/Applications -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             exit 1
           fi
-
-          cat > /tmp/entitlements-main.plist <<'ENTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>aps-environment</key>
-            <string>production</string>
-            <key>com.apple.security.application-groups</key>
-            <array>
-              <string>group.jiamin.chen.Orange-Cloud</string>
-            </array>
-            <key>keychain-access-groups</key>
-            <array>
-              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
-            </array>
-          </dict>
-          </plist>
-          ENTEOF
-
-          cat > /tmp/entitlements-ext.plist <<'ENTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>com.apple.security.application-groups</key>
-            <array>
-              <string>group.jiamin.chen.Orange-Cloud</string>
-            </array>
-            <key>keychain-access-groups</key>
-            <array>
-              <string>$(AppIdentifierPrefix)jiamin.chen.orange-cloud.shared</string>
-            </array>
-          </dict>
-          </plist>
-          ENTEOF
-
-          find "$APP_PATH/Frameworks" -name "*.dylib" -type f 2>/dev/null | while read dylib; do
-            codesign --force --sign - "$dylib"
-          done
-
-          find "$APP_PATH/Frameworks" -name "*.framework" -type d 2>/dev/null | while read fw; do
-            codesign --force --sign - "$fw"
-          done
-
-          find "$APP_PATH" -name "*.appex" -type d | while read ext; do
-            codesign --force --sign - --entitlements /tmp/entitlements-ext.plist "$ext"
-          done
-
-          codesign --force --sign - --entitlements /tmp/entitlements-main.plist "$APP_PATH"
-
+          
           mkdir -p build/Payload
           cp -a "$APP_PATH" build/Payload/
-
+          
           cd build
           zip -qry OrangeCloud.ipa Payload
-
+          
           mkdir -p export
           mv OrangeCloud.ipa export/
 
