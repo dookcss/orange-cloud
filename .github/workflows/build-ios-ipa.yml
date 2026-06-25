@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+env:
+  BUILD_CONFIG: Release
+
 jobs:
   build:
     runs-on: macos-15
@@ -34,6 +37,7 @@ jobs:
         run: |
           set -e
           SCHEME="Orange Cloud"
+          CONFIG="${{ env.BUILD_CONFIG }}"
           BUILD_DIR="$PWD/build/derived"
           mkdir -p build
           
@@ -41,7 +45,7 @@ jobs:
             xcodebuild build \
               -workspace "${{ steps.detect.outputs.workspace_path }}" \
               -scheme "$SCHEME" \
-              -configuration Debug \
+              -configuration "$CONFIG" \
               -destination "generic/platform=iOS" \
               -derivedDataPath "$BUILD_DIR" \
               CODE_SIGN_IDENTITY="" \
@@ -55,7 +59,7 @@ jobs:
             xcodebuild build \
               -project "${{ steps.detect.outputs.project_path }}" \
               -scheme "$SCHEME" \
-              -configuration Debug \
+              -configuration "$CONFIG" \
               -destination "generic/platform=iOS" \
               -derivedDataPath "$BUILD_DIR" \
               CODE_SIGN_IDENTITY="" \
@@ -70,7 +74,8 @@ jobs:
       - name: Package IPA
         run: |
           set -e
-          APP_PATH=$(find build/derived/Build/Products/Debug-iphoneos -name "*.app" | head -n 1)
+          CONFIG="${{ env.BUILD_CONFIG }}"
+          APP_PATH=$(find "build/derived/Build/Products/${CONFIG}-iphoneos" -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             exit 1
           fi
