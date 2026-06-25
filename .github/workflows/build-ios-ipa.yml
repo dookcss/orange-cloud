@@ -6,12 +6,13 @@ on:
     branches:
       - main
 
-env:
-  BUILD_CONFIG: Release
-
 jobs:
   build:
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, Debug]
 
     steps:
       - name: Checkout
@@ -37,7 +38,7 @@ jobs:
         run: |
           set -e
           SCHEME="Orange Cloud"
-          CONFIG="${{ env.BUILD_CONFIG }}"
+          CONFIG="${{ matrix.config }}"
           BUILD_DIR="$PWD/build/derived"
           mkdir -p build
           
@@ -74,7 +75,8 @@ jobs:
       - name: Package IPA
         run: |
           set -e
-          CONFIG="${{ env.BUILD_CONFIG }}"
+          CONFIG="${{ matrix.config }}"
+          CONFIG_LOWER=$(echo "$CONFIG" | tr '[:upper:]' '[:lower:]')
           APP_PATH=$(find "build/derived/Build/Products/${CONFIG}-iphoneos" -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             exit 1
@@ -86,12 +88,12 @@ jobs:
           rm -rf build/export/Payload/*.app/_CodeSignature
           
           cd build/export
-          zip -qry OrangeCloud.ipa Payload
+          zip -qry "OrangeCloud-${CONFIG_LOWER}.ipa" Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: orange-cloud-ipa
+          name: orange-cloud-ipa-${{ matrix.config }}
           path: build/export/*.ipa
           if-no-files-found: error
 
@@ -99,6 +101,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: orange-cloud-build-logs
+          name: orange-cloud-build-logs-${{ matrix.config }}
           path: build/xcodebuild.log
           if-no-files-found: warn
