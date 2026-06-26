@@ -170,7 +170,6 @@ struct DashboardView: View {
             .confirmationDialog("切换账号", isPresented: $showAccountSwitcher, titleVisibility: .visible) {
                 accountSwitcherActions
             }
-        }
     }
 
     /// 下拉刷新 / 顶部失败提示重试：强制重拉账号、资产、流量、用量
