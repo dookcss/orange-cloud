@@ -114,8 +114,7 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     daybreakHeader
                     if session.error != nil || viewModel.loadFailed {
