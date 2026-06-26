@@ -138,9 +138,6 @@ struct DashboardView: View {
             }
             .background { SkyBackground() }
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: CachedZone.self) { zone in
-                ZoneDetailView(zone: zone, session: session)
-            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     accountMenu
@@ -962,7 +959,9 @@ struct DashboardView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(displayZones) { zone in
-                        NavigationLink(value: zone) {
+                        NavigationLink {
+                            ZoneDetailView(zone: zone, session: session)
+                        } label: {
                             DashboardZoneCard(
                                 zone: zone,
                                 points: viewModel.trafficByZone[zone.id]?.points
