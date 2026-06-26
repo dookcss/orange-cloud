@@ -996,7 +996,6 @@ struct DashboardView: View {
         .padding(.vertical, 12)
         .glassIsland(cornerRadius: 24)
     }
-}
 
 // MARK: - 用量宫格的服务与瓦片
 
