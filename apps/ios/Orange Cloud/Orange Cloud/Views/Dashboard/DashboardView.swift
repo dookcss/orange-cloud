@@ -391,15 +391,12 @@ struct DashboardView: View {
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 1, green: 0.65, blue: 0.31), .ocOrangePressed],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ),
-                    in: Circle()
-                )
+                .background(LinearGradient(
+                    colors: [Color(red: 1, green: 0.65, blue: 0.31), .ocOrangePressed],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .clipShape(Circle())
         }
-        .popoverTip(accountSwitchTip)
         .accessibilityLabel("切换账号")
         .accessibilityValue(session.selectedAccount?.name ?? "")
     }
