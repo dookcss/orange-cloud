@@ -115,7 +115,6 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     daybreakHeader
-                        .islandReveal(0)
                     if session.error != nil || viewModel.loadFailed {
                         RefreshFailedBanner { Task { await refreshAll() } }
                     }
@@ -137,6 +136,7 @@ struct DashboardView: View {
                 .padding(OCLayout.pagePadding)
             }
             .background { SkyBackground() }
+            .navigationTitle("概览")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -146,14 +146,12 @@ struct DashboardView: View {
             .task(id: session.accounts.count) {
                 AccountSwitchTip.hasMultipleAccounts = session.accounts.count > 1 || auth.sessions.count > 1
             }
-            .task(id: displayZones.map(\.id)) {
+            .task(id: session.selectedAccount?.id) {
+                guard session.selectedAccount?.id != nil else { return }
+                async let assets: () = loadAssets()
+                async let usage: () = loadUsage()
+                _ = await (assets, usage)
                 await loadTraffic()
-            }
-            .task(id: session.selectedAccount?.id) {
-                await loadAssets()
-            }
-            .task(id: session.selectedAccount?.id) {
-                await loadUsage()
             }
             .onChange(of: accountPrefs.billingCycleDay) {
                 Task { await loadUsage(force: true) }
