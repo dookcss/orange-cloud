@@ -382,15 +382,10 @@ struct DashboardView: View {
                 }
             }
         } label: {
-            Text(String(session.selectedAccount?.name.first ?? "?").uppercased())
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 22))
+                .foregroundStyle(Color.ocOrangeText)
                 .frame(width: 30, height: 30)
-                .background(LinearGradient(
-                    colors: [Color(red: 1, green: 0.65, blue: 0.31), .ocOrangePressed],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ))
-                .clipShape(Circle())
         }
         .accessibilityLabel("切换账号")
         .accessibilityValue(session.selectedAccount?.name ?? "")
