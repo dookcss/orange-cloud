@@ -398,7 +398,6 @@ struct DashboardView: View {
                     ),
                     in: Circle()
                 )
-                .symbolEffect(.bounce, value: session.selectedAccount?.id)
         }
         .popoverTip(accountSwitchTip)
         .accessibilityLabel("切换账号")
