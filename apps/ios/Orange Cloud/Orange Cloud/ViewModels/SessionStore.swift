@@ -37,6 +37,11 @@ final class SessionStore {
     let emailRoutingService:       EmailRoutingService
     let rateLimitService:          RateLimitService
     let zeroTrustService:          ZeroTrustService
+    let queueService:              QueueService
+    let aiGatewayService:          AIGatewayService
+    let durableObjectService:      DurableObjectService
+    let workersAIService:          WorkersAIService
+    let hyperdriveService:         HyperdriveService
 
     var accounts: [Account] = []
     var selectedAccount: Account? {
@@ -82,6 +87,11 @@ final class SessionStore {
         self.emailRoutingService       = EmailRoutingService(client: client)
         self.rateLimitService          = RateLimitService(client: client)
         self.zeroTrustService          = ZeroTrustService(client: client)
+        self.queueService              = QueueService(client: client)
+        self.aiGatewayService          = AIGatewayService(client: client)
+        self.durableObjectService      = DurableObjectService(client: client)
+        self.workersAIService          = WorkersAIService(client: client)
+        self.hyperdriveService         = HyperdriveService(client: client)
     }
 
     /// 幂等加载账号列表，首个账号设为当前账号
@@ -97,6 +107,13 @@ final class SessionStore {
             // 登录身份的展示名同步为真实账号名（设置页与 Dashboard 一致）
             if let name = accounts.first?.name, let sessionId {
                 authManager.updateSessionLabel(name, for: sessionId)
+            }
+            // 把本身份的账号并入 Widget 账号目录（小组件「选择账号」picker 数据源）
+            if let sessionId {
+                WidgetDataStore.mergeAccounts(
+                    accounts.map { WidgetAccount(id: $0.id, name: $0.name, sessionId: sessionId.uuidString) },
+                    sessionId: sessionId.uuidString
+                )
             }
         } catch {
             self.error = error.localizedDescription
