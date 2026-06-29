@@ -13,6 +13,9 @@
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
+	"vars": {
+		"NEXT_PRIVATE_MINIMAL_MODE": "true"
+	},
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".open-next/assets"

@@ -9,10 +9,17 @@ import { default as handler } from "./.open-next/worker.js";
 import { captureRanks } from "./src/lib/ranks/capture";
 
 export default {
-	fetch: handler.fetch,
+	async fetch(request, env, ctx) {
+		return handler.fetch(request, env, ctx);
+	},
 
 	// 每天 UTC 08:00（wrangler.jsonc triggers.crons）抓 App Store 各地区榜单名次入 D1。
+	// 当 D1 绑定未配置时安全跳过。
 	async scheduled(_controller, env, ctx) {
+		if (!env.IAP_DB) {
+			console.log("[scheduled] IAP_DB binding not configured, skipping rank capture.");
+			return;
+		}
 		ctx.waitUntil(captureRanks(env.IAP_DB));
 	},
 } satisfies ExportedHandler<CloudflareEnv>;
