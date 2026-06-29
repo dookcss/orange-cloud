@@ -51,9 +51,8 @@ jobs:
           node -e "
           const fs = require('fs');
           let code = fs.readFileSync('apps/web/wrangler.jsonc', 'utf8');
-          // remove comments so we can parse it
-          const jsonString = code.replace(/\/\/.*$/gm, '');
-          const config = JSON.parse(jsonString);
+          // use eval to parse JSONC (handles block comments and trailing commas)
+          const config = eval('(' + code + ')');
           
           if (process.env.WEB_CUSTOM_DOMAIN) {
             config.routes = [{ pattern: process.env.WEB_CUSTOM_DOMAIN, custom_domain: true }];
