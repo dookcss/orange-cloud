@@ -34,6 +34,19 @@ jobs:
           echo "project_path=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
           echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
 
+      - name: Patch OAuth config
+        if: vars.OAUTH_CLIENT_ID != ''
+        run: |
+          CONFIG_FILE="apps/ios/Orange Cloud/Orange Cloud/Core/Auth/OAuthConfig.swift"
+          # Replace Client ID
+          sed -i "s|static let clientID = \".*\"|static let clientID = \"${{ vars.OAUTH_CLIENT_ID }}\"|" "$CONFIG_FILE"
+          # Replace Redirect URI (if variable is set)
+          if [ -n "${{ vars.OAUTH_REDIRECT_URI }}" ]; then
+            sed -i "s|static let redirectURI = \".*\"|static let redirectURI = \"${{ vars.OAUTH_REDIRECT_URI }}\"|" "$CONFIG_FILE"
+          fi
+          echo "✅ Patched OAuthConfig.swift:"
+          grep -E "clientID|redirectURI" "$CONFIG_FILE"
+
       - name: Build App (No Sign)
         run: |
           set -eo pipefail
