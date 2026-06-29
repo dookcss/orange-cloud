@@ -56,6 +56,10 @@ jobs:
           
           if (process.env.WEB_CUSTOM_DOMAIN) {
             config.routes = [{ pattern: process.env.WEB_CUSTOM_DOMAIN, custom_domain: true }];
+          } else {
+            // Delete upstream author's hardcoded routes (e.g. o-c.do) so deployment doesn't fail
+            // Cloudflare will automatically use a .workers.dev subdomain instead.
+            delete config.routes;
           }
           
           if (process.env.D1_DATABASE_ID) {
