@@ -46,14 +46,37 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Patch custom domain
-        if: vars.WEB_CUSTOM_DOMAIN != ''
+      - name: Patch wrangler config
         run: |
-          CONFIG_FILE="apps/web/wrangler.jsonc"
-          # Replace the custom domain in wrangler.jsonc
-          sed -i "s|\"pattern\": \".*\"|\"pattern\": \"${{ vars.WEB_CUSTOM_DOMAIN }}\"|" "$CONFIG_FILE"
-          echo "✅ Patched wrangler.jsonc domain:"
-          grep "pattern" "$CONFIG_FILE"
+          node -e "
+          const fs = require('fs');
+          let code = fs.readFileSync('apps/web/wrangler.jsonc', 'utf8');
+          // remove comments so we can parse it
+          const jsonString = code.replace(/\/\/.*$/gm, '');
+          const config = JSON.parse(jsonString);
+          
+          if (process.env.WEB_CUSTOM_DOMAIN) {
+            config.routes = [{ pattern: process.env.WEB_CUSTOM_DOMAIN, custom_domain: true }];
+          }
+          
+          if (process.env.D1_DATABASE_ID) {
+            if (config.d1_databases && config.d1_databases.length > 0) {
+              config.d1_databases[0].database_id = process.env.D1_DATABASE_ID;
+            }
+          } else {
+            delete config.d1_databases;
+          }
+          
+          // Next.js minimal mode
+          config.vars = config.vars || {};
+          config.vars.NEXT_PRIVATE_MINIMAL_MODE = 'true';
+          
+          fs.writeFileSync('apps/web/wrangler.jsonc', JSON.stringify(config, null, 2));
+          console.log('✅ Patched wrangler config');
+          "
+        env:
+          WEB_CUSTOM_DOMAIN: ${{ vars.WEB_CUSTOM_DOMAIN }}
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
 
       - name: Build & Deploy
         run: pnpm run deploy
