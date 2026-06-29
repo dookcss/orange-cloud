@@ -76,8 +76,10 @@ struct MainTabView: View {
     // 让按账号过滤的 @Query 谓词刷新、列表数据重新拉取（资源跟着选中账号走）。
 
     @ViewBuilder private var dashboardTab: some View {
-        DashboardView(session: session)
-            .id(session.selectedAccount?.id)
+        NavigationStack {
+            DashboardView(session: session)
+                .id(session.selectedAccount?.id)
+        }
     }
 
     @ViewBuilder private var zonesTab: some View {

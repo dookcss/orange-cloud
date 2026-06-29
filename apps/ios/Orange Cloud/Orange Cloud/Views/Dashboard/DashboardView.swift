@@ -60,6 +60,9 @@ struct DashboardView: View {
     /// 用量宫格点开的服务明细（sheet）
     @State private var usageDetail: UsageService?
 
+    /// 账号 / 身份切换器（confirmationDialog，避免在导航栏 Toolbar 里放动态 Menu 触发 iOS 17 布局崩溃）
+    @State private var showAccountSwitcher = false
+
     /// 「今日」日界口径（设置页修改，App Group 与 Widget 共享）；变更后强制刷新用量
     @AppStorage(DayBoundary.storageKey, store: UserDefaults(suiteName: WidgetSnapshot.appGroupID))
     private var dayBoundaryRaw = DayBoundary.utc.rawValue
@@ -111,11 +114,9 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     daybreakHeader
-                        .islandReveal(0)
                     if session.error != nil || viewModel.loadFailed {
                         RefreshFailedBanner { Task { await refreshAll() } }
                     }
@@ -139,10 +140,8 @@ struct DashboardView: View {
                 .padding(OCLayout.pagePadding)
             }
             .background { SkyBackground() }
+            .navigationTitle("概览")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: CachedZone.self) { zone in
-                ZoneDetailView(zone: zone, session: session)
-            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     accountMenu
@@ -151,14 +150,12 @@ struct DashboardView: View {
             .task(id: session.accounts.count) {
                 AccountSwitchTip.hasMultipleAccounts = session.accounts.count > 1 || auth.sessions.count > 1
             }
-            .task(id: displayZones.map(\.id)) {
+            .task(id: session.selectedAccount?.id) {
+                guard session.selectedAccount?.id != nil else { return }
+                async let assets: () = loadAssets()
+                async let usage: () = loadUsage()
+                _ = await (assets, usage)
                 await loadTraffic()
-            }
-            .task(id: session.selectedAccount?.id) {
-                await loadAssets()
-            }
-            .task(id: session.selectedAccount?.id) {
-                await loadUsage()
             }
             .onChange(of: accountPrefs.billingCycleDay) {
                 Task { await loadUsage(force: true) }
@@ -172,7 +169,9 @@ struct DashboardView: View {
             .sheet(item: $usageDetail) { service in
                 usageDetailSheet(service)
             }
-        }
+            .confirmationDialog("切换账号", isPresented: $showAccountSwitcher, titleVisibility: .visible) {
+                accountSwitcherActions
+            }
     }
 
     /// 下拉刷新 / 顶部失败提示重试：强制重拉账号、资产、流量、用量
@@ -355,57 +354,44 @@ struct DashboardView: View {
 
     // MARK: - 右上角账号头像菜单
 
+    /// 工具栏按钮：完全静态（不绑定任何会异步变化的状态），点击才弹出切换器。
+    /// 注意：iOS 17 在导航栏 ToolbarItem 里放内容随 session.accounts / auth.sessions
+    /// 动态变化的 Menu，会在数据返回那一刻触发 UINavigationBar layoutSubviews 崩溃，
+    /// 故这里只放静态 Button，切换列表交给 confirmationDialog（点击时才构建）。
     private var accountMenu: some View {
-        Menu {
-            // 登录身份（在设置里「添加账号」加的，多个时点这里直接切换）
-            Section {
-                ForEach(auth.sessions) { identity in
-                    Button {
-                        if identity.id != auth.currentSessionId {
-                            auth.switchSession(identity.id)
-                        }
-                    } label: {
-                        if identity.id == auth.currentSessionId {
-                            Label(identity.label, systemImage: "checkmark")
-                        } else {
-                            Text(identity.label)
-                        }
-                    }
-                }
-            }
-            // 当前身份下的多个 Cloudflare 账号
-            if session.accounts.count > 1 {
-                Section("Cloudflare 账号") {
-                    ForEach(session.accounts) { account in
-                        Button {
-                            session.selectedAccount = account
-                        } label: {
-                            if account.id == session.selectedAccount?.id {
-                                Label(account.name, systemImage: "checkmark")
-                            } else {
-                                Text(account.name)
-                            }
-                        }
-                    }
-                }
-            }
+        Button {
+            showAccountSwitcher = true
         } label: {
-            Text(String(session.selectedAccount?.name.first ?? "?").uppercased())
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 22))
+                .foregroundStyle(Color.ocOrangeText)
                 .frame(width: 30, height: 30)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 1, green: 0.65, blue: 0.31), .ocOrangePressed],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ),
-                    in: Circle()
-                )
-                .symbolEffect(.bounce, value: session.selectedAccount?.id)
         }
         .safePopoverTip(accountSwitchTip)
         .accessibilityLabel("切换账号")
-        .accessibilityValue(session.selectedAccount?.name ?? "")
+    }
+
+    /// 账号 / 身份切换器的动作集（在 confirmationDialog 内构建，不参与导航栏布局）
+    @ViewBuilder
+    private var accountSwitcherActions: some View {
+        ForEach(auth.sessions) { identity in
+            Button {
+                if identity.id != auth.currentSessionId {
+                    auth.switchSession(identity.id)
+                }
+            } label: {
+                Text(identity.id == auth.currentSessionId ? "✓ \(identity.label)" : identity.label)
+            }
+        }
+        if session.accounts.count > 1 {
+            ForEach(session.accounts) { account in
+                Button {
+                    session.selectedAccount = account
+                } label: {
+                    Text(account.id == session.selectedAccount?.id ? "✓ \(account.name)" : account.name)
+                }
+            }
+        }
     }
 
     // MARK: - 资产指标格（2×2）
@@ -969,7 +955,9 @@ struct DashboardView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(displayZones) { zone in
-                        NavigationLink(value: zone) {
+                        NavigationLink {
+                            ZoneDetailView(zone: zone, session: session)
+                        } label: {
                             DashboardZoneCard(
                                 zone: zone,
                                 points: viewModel.trafficByZone[zone.id]?.points
