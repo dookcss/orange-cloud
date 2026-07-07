@@ -34,26 +34,14 @@ jobs:
           echo "project_path=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
           echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Patch OAuth config
+      - name: Force official upstream OAuth config
         run: |
           CONFIG_FILE="apps/ios/Orange Cloud/Orange Cloud/Core/Auth/OAuthConfig.swift"
-          # If vars.OAUTH_CLIENT_ID is provided, patch it; otherwise fallback to upstream official clientID
-          if [ -n "${{ vars.OAUTH_CLIENT_ID }}" ]; then
-            sed -i "" "s|static let clientID = \".*\"|static let clientID = \"${{ vars.OAUTH_CLIENT_ID }}\"|" "$CONFIG_FILE"
-          else
-            # Revert to upstream official clientID: 102240eb9095a1965ee11813ef4788cd
-            sed -i "" "s|static let clientID = \".*\"|static let clientID = \"102240eb9095a1965ee11813ef4788cd\"|" "$CONFIG_FILE"
-          fi
-          
-          # If vars.OAUTH_REDIRECT_URI is provided, patch it; otherwise fallback to upstream official redirectURI
-          if [ -n "${{ vars.OAUTH_REDIRECT_URI }}" ]; then
-            sed -i "" "s|static let redirectURI = \".*\"|static let redirectURI = \"${{ vars.OAUTH_REDIRECT_URI }}\"|" "$CONFIG_FILE"
-          else
-            # Revert to upstream official redirectURI: https://o-c.do/oauth/callback
-            sed -i "" "s|static let redirectURI = \".*\"|static let redirectURI = \"https://o-c.do/oauth/callback\"|" "$CONFIG_FILE"
-          fi
-          
-          echo "✅ Patched OAuthConfig.swift:"
+          # Force upstream official clientID: 102240eb9095a1965ee11813ef4788cd
+          sed -i "" "s|static let clientID = \".*\"|static let clientID = \"102240eb9095a1965ee11813ef4788cd\"|" "$CONFIG_FILE"
+          # Force upstream official redirectURI: https://o-c.do/oauth/callback
+          sed -i "" "s|static let redirectURI = \".*\"|static let redirectURI = \"https://o-c.do/oauth/callback\"|" "$CONFIG_FILE"
+          echo "✅ Patched OAuthConfig.swift to official upstream:"
           grep -E "clientID|redirectURI" "$CONFIG_FILE"
 
       - name: Build App (No Sign)
