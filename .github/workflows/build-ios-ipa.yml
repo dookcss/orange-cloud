@@ -35,15 +35,24 @@ jobs:
           echo "workspace_path=$WORKSPACE_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Patch OAuth config
-        if: vars.OAUTH_CLIENT_ID != ''
         run: |
           CONFIG_FILE="apps/ios/Orange Cloud/Orange Cloud/Core/Auth/OAuthConfig.swift"
-          # Replace Client ID
-          sed -i "s|static let clientID = \".*\"|static let clientID = \"${{ vars.OAUTH_CLIENT_ID }}\"|" "$CONFIG_FILE"
-          # Replace Redirect URI (if variable is set)
-          if [ -n "${{ vars.OAUTH_REDIRECT_URI }}" ]; then
-            sed -i "s|static let redirectURI = \".*\"|static let redirectURI = \"${{ vars.OAUTH_REDIRECT_URI }}\"|" "$CONFIG_FILE"
+          # If vars.OAUTH_CLIENT_ID is provided, patch it; otherwise fallback to upstream official clientID
+          if [ -n "${{ vars.OAUTH_CLIENT_ID }}" ]; then
+            sed -i "" "s|static let clientID = \".*\"|static let clientID = \"${{ vars.OAUTH_CLIENT_ID }}\"|" "$CONFIG_FILE"
+          else
+            # Revert to upstream official clientID: 102240eb9095a1965ee11813ef4788cd
+            sed -i "" "s|static let clientID = \".*\"|static let clientID = \"102240eb9095a1965ee11813ef4788cd\"|" "$CONFIG_FILE"
           fi
+          
+          # If vars.OAUTH_REDIRECT_URI is provided, patch it; otherwise fallback to upstream official redirectURI
+          if [ -n "${{ vars.OAUTH_REDIRECT_URI }}" ]; then
+            sed -i "" "s|static let redirectURI = \".*\"|static let redirectURI = \"${{ vars.OAUTH_REDIRECT_URI }}\"|" "$CONFIG_FILE"
+          else
+            # Revert to upstream official redirectURI: https://o-c.do/oauth/callback
+            sed -i "" "s|static let redirectURI = \".*\"|static let redirectURI = \"https://o-c.do/oauth/callback\"|" "$CONFIG_FILE"
+          fi
+          
           echo "✅ Patched OAuthConfig.swift:"
           grep -E "clientID|redirectURI" "$CONFIG_FILE"
 
