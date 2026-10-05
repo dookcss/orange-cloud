@@ -34,7 +34,8 @@ struct R2ObjectListView: View {
         _viewModel = State(initialValue: R2ObjectListViewModel(
             service: session.r2Service,
             accountId: session.selectedAccount?.id ?? "",
-            bucketName: bucket.name
+            bucketName: bucket.name,
+            jurisdiction: bucket.jurisdiction
         ))
     }
 
@@ -156,15 +157,77 @@ struct R2ObjectListView: View {
                     }
                 }
             }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .any(of: [.images, .videos]))
-            .quickLookPreview($previewURL)
-            .overlay {
-                if viewModel.isDownloading {
-                    ZStack {
-                        Color.black.opacity(0.15).ignoresSafeArea()
-                        ProgressView("下载中…")
-                            .padding(18)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .any(of: [.images, .videos]))
+        .quickLookPreview($previewURL)
+        .overlay {
+            if viewModel.isDownloading {
+                ZStack {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    ProgressView("下载中…")
+                        .padding(18)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+        .task { await viewModel.load() }
+        .onChange(of: photoItem) {
+            guard let item = photoItem else { return }
+            photoItem = nil
+            guard canWrite else { showDenied = true; return }
+            Task { await uploadPhoto(item) }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
+            guard canWrite else { showDenied = true; return }
+            if case .success(let url) = result {
+                Task { await uploadFile(url) }
+            }
+        }
+        .sheet(item: $selectedObject) { object in
+            R2ObjectDetailView(object: object, viewModel: viewModel, canWrite: canWrite)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showSettings) {
+            R2BucketSettingsView(bucket: bucket, session: session, canWrite: canWrite)
+        }
+        .confirmationDialog(
+            "删除对象",
+            isPresented: .init(
+                get: { objectToDelete != nil },
+                set: { if !$0 { objectToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let object = objectToDelete {
+                Button("删除 \(object.key)", role: .destructive) {
+                    Task { _ = await viewModel.delete(key: object.key) }
+                }
+            }
+        } message: {
+            Text("此操作不可撤销。")
+        }
+        .alert("权限不足", isPresented: $showDenied) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("当前授权未包含 R2 写权限（workers-r2.write）。\n请在设置中退出登录后重新授权以启用此功能。")
+        }
+        .alert("出错了", isPresented: .init(
+            get: { viewModel.error != nil && selectedObject == nil },
+            set: { if !$0 { viewModel.error = nil } }
+        )) {
+            apiErrorDocButton(for: viewModel.error)
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(viewModel.error ?? "")
+        }
+        .sensoryFeedback(.success, trigger: viewModel.didUpload)
+        .sensoryFeedback(.success, trigger: viewModel.didTransfer)
+        .sheet(item: $transferTarget) { request in
+            R2TransferSheet(object: request.object, mode: request.mode) { destinationKey in
+                Task {
+                    switch request.mode {
+                    case .copy: _ = await viewModel.copyObject(request.object, to: destinationKey)
+                    case .move: _ = await viewModel.moveObject(request.object, to: destinationKey)
                     }
                 }
             }
